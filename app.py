@@ -38,27 +38,27 @@ ALL_MOVIES = ["왕과 사는 남자", "명량", "사도", "기생충"]
 MOVIE_MAP = {
     "왕과 사는 남자": {
         "display_name": "왕과 사는 남자",
-        "tmdb_id": 1885,
-        "kobis_nm": "왕과 남자",
-        "release_date": "2005-12-29"
+        "tmdb_id": 1321179,          # TMDB 확인 완료
+        "kobis_nm": "왕과 사는 남자", # KOBIS 영화명 수정
+        "release_date": "2026-02-04" # TMDB 개봉일 확인 완료
     },
     "명량": {
         "display_name": "명량",
-        "tmdb_id": 283566,
+        "tmdb_id": 282631,           # TMDB 확인 완료
         "kobis_nm": "명량",
-        "release_date": "2014-07-30"
+        "release_date": "2014-07-30" # TMDB 개봉일 확인 완료
     },
     "사도": {
         "display_name": "사도",
-        "tmdb_id": 318049,
+        "tmdb_id": 315439,           # TMDB 확인 완료
         "kobis_nm": "사도",
-        "release_date": "2015-09-16"
+        "release_date": "2015-09-16" # TMDB 개봉일 확인 완료
     },
     "기생충": {
         "display_name": "기생충",
-        "tmdb_id": 496243,
+        "tmdb_id": 496243,           # TMDB 확인 완료
         "kobis_nm": "기생충",
-        "release_date": "2019-05-30"
+        "release_date": "2019-05-30" # TMDB 개봉일 확인 완료
     }
 }
 
@@ -155,17 +155,27 @@ def fetch_kobis(movie_nm: str, release_date: str, days: int = 120):
 
 @st.cache_data(ttl=3600)
 def fetch_yt_videos(movie_title: str):
-    """YouTube Data API v3를 통해 영화 관련 영상 정보를 수집합니다."""
+    """
+    YouTube Data API v3를 통해 영화 관련 영상 정보를 수집합니다.
+    - 한국어 제목을 검색 쿼리로 사용
+    - 제목 필터링을 완화하여 한국어/영어 영상 모두 수집
+    """
     queries = [
-        movie_title, f"{movie_title} 예고편", f"{movie_title} 리뷰",
-        f"{movie_title} 해석", f"{movie_title} 명장면", f"{movie_title} trailer",
+        movie_title,
+        f"{movie_title} 예고편",
+        f"{movie_title} 리뷰",
+        f"{movie_title} 해석",
+        f"{movie_title} 명장면",
+        f"{movie_title} trailer",
     ]
     try:
         yt = build("youtube", "v3", developerKey=YOUTUBE_API_KEY)
         seen, ids = set(), []
         for q in queries:
             try:
-                res = yt.search().list(q=q, part="id,snippet", maxResults=5, type="video").execute()
+                res = yt.search().list(
+                    q=q, part="id,snippet", maxResults=10, type="video"
+                ).execute()
                 for item in res.get("items", []):
                     vid = item["id"]["videoId"]
                     if vid not in seen:
@@ -178,25 +188,24 @@ def fetch_yt_videos(movie_title: str):
         for i in range(0, len(ids), 50):
             batch = ids[i:i+50]
             try:
-                vres = yt.videos().list(id=",".join(batch), part="snippet,statistics").execute()
+                vres = yt.videos().list(
+                    id=",".join(batch), part="snippet,statistics"
+                ).execute()
                 for item in vres.get("items", []):
-                    s  = item.get("snippet", {})
-                    st_ = item.get("statistics", {})
-                    title = s.get("title", "")
-                    if movie_title not in title:
-                        continue
+                    snip  = item.get("snippet", {})
+                    stats = item.get("statistics", {})
+                    title = snip.get("title", "")
                     video_id = item["id"]
                     rows.append({
                         "movie_title":   movie_title,
                         "video_id":      video_id,
                         "title":         title,
-                        "channel":       s.get("channelTitle", ""),
-                        "published":     s.get("publishedAt", "")[:10],
-                        "view_count":    int(st_.get("viewCount", 0)),
-                        "like_count":    int(st_.get("likeCount", 0)),
-                        "comment_count": int(st_.get("commentCount", 0)),
+                        "channel":       snip.get("channelTitle", ""),
+                        "published":     snip.get("publishedAt", "")[:10],
+                        "view_count":    int(stats.get("viewCount", 0)),
+                        "like_count":    int(stats.get("likeCount", 0)),
+                        "comment_count": int(stats.get("commentCount", 0)),
                         "유형":           classify_video(title),
-                        # 영상 링크 컬럼 추가
                         "url":           f"https://www.youtube.com/watch?v={video_id}",
                     })
             except HttpError:
