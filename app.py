@@ -153,21 +153,48 @@ def fetch_kobis(movie_nm: str, release_date: str, days: int = 120):
     return pd.DataFrame(data).sort_values("날짜") if data else pd.DataFrame()
 
 
+def is_relevant_video(title, movie_title):
+    title = title.lower()
+    keyword_map = {
+        "왕과 사는 남자": ["왕과 사는 남자", "왕사남"],
+        "명량": ["명량"],
+        "사도": ["사도"],
+        "기생충": ["기생충", "parasite"]
+    }
+    keywords = keyword_map.get(movie_title, [movie_title])
+    return any(k.lower() in title for k in keywords)
+
+
 @st.cache_data(ttl=3600)
 def fetch_yt_videos(movie_title: str):
     """
     YouTube Data API v3를 통해 영화 관련 영상 정보를 수집합니다.
-    - 한국어 제목을 검색 쿼리로 사용
-    - 제목 필터링을 완화하여 한국어/영어 영상 모두 수집
     """
-    queries = [
-        movie_title,
-        f"{movie_title} 예고편",
-        f"{movie_title} 리뷰",
-        f"{movie_title} 해석",
-        f"{movie_title} 명장면",
-        f"{movie_title} trailer",
-    ]
+    query_map = {
+        "왕과 사는 남자": [
+            "왕과 사는 남자",
+            "왕사남",
+            "왕과 사는 남자 리뷰",
+            "왕사남 리뷰",
+            "왕과 사는 남자 예고편"
+        ],
+        "명량": [
+            "명량",
+            "명량 예고편",
+            "명량 리뷰"
+        ],
+        "사도": [
+            "사도",
+            "사도 예고편",
+            "사도 리뷰"
+        ],
+        "기생충": [
+            "기생충",
+            "parasite movie",
+            "기생충 리뷰"
+        ]
+    }
+    queries = query_map.get(movie_title, [movie_title])
     try:
         yt = build("youtube", "v3", developerKey=YOUTUBE_API_KEY)
         seen, ids = set(), []
@@ -182,6 +209,7 @@ def fetch_yt_videos(movie_title: str):
                         seen.add(vid)
                         ids.append(vid)
             except HttpError:
+                st.warning("YouTube API 호출 실패 (검색)")
                 continue
 
         rows = []
@@ -195,6 +223,10 @@ def fetch_yt_videos(movie_title: str):
                     snip  = item.get("snippet", {})
                     stats = item.get("statistics", {})
                     title = snip.get("title", "")
+                    
+                    if not is_relevant_video(title, movie_title):
+                        continue
+                        
                     video_id = item["id"]
                     rows.append({
                         "movie_title":   movie_title,
@@ -209,6 +241,7 @@ def fetch_yt_videos(movie_title: str):
                         "url":           f"https://www.youtube.com/watch?v={video_id}",
                     })
             except HttpError:
+                st.warning("YouTube API 호출 실패 (비디오 상세)")
                 continue
 
         if not rows:
@@ -217,6 +250,7 @@ def fetch_yt_videos(movie_title: str):
         return df.sort_values("view_count", ascending=False).reset_index(drop=True)
 
     except Exception:
+        st.warning("YouTube API 호출 실패")
         return pd.DataFrame()
 
 
@@ -286,6 +320,8 @@ def load_all_yt():
 # ─────────────────────────────────────────────
 # Sidebar
 # ─────────────────────────────────────────────
+st.cache_data.clear()
+
 st.sidebar.title("🎬 영화 흥행 비교 대시보드")
 st.sidebar.markdown("비교 기준 영화를 선택하면\n나머지 3편과 자동으로 비교합니다.")
 focus = st.sidebar.selectbox("🔍 포커스 영화 선택", ALL_MOVIES, index=0)
@@ -660,11 +696,16 @@ with tab3:
         foc_yt_df = df_yt_all[df_yt_all["movie_title"] == focus].head(10)
         if not foc_yt_df.empty:
             disp = foc_yt_df[[
-                "title", "channel", "published", "유형",
+                "title", "channel", "published",
                 "view_count", "like_count", "comment_count", "url"
             ]].copy()
-            disp.columns = ["제목", "채널", "업로드일", "유형", "조회수", "좋아요", "댓글수", "영상 링크"]
-            st.dataframe(disp, use_container_width=True, hide_index=True)
+            disp.columns = ["제목", "채널", "업로드일", "조회수", "좋아요", "댓글수", "영상링크"]
+            st.dataframe(
+                disp, 
+                use_container_width=True, 
+                hide_index=True,
+                column_config={"영상링크": st.column_config.LinkColumn("영상링크")}
+            )
 
             # 댓글 키워드 분석
             st.subheader(f"💬 [{focus}] 상위 3개 영상 댓글 키워드 분석")
