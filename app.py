@@ -171,28 +171,10 @@ def fetch_yt_videos(movie_title: str):
     YouTube Data API v3를 통해 영화 관련 영상 정보를 수집합니다.
     """
     query_map = {
-        "왕과 사는 남자": [
-            "왕과 사는 남자",
-            "왕사남",
-            "왕과 사는 남자 리뷰",
-            "왕사남 리뷰",
-            "왕과 사는 남자 예고편"
-        ],
-        "명량": [
-            "명량",
-            "명량 예고편",
-            "명량 리뷰"
-        ],
-        "사도": [
-            "사도",
-            "사도 예고편",
-            "사도 리뷰"
-        ],
-        "기생충": [
-            "기생충",
-            "parasite movie",
-            "기생충 리뷰"
-        ]
+        "왕과 사는 남자": ["왕과 사는 남자", "왕사남"],
+        "명량": ["명량", "명량 영화"],
+        "사도": ["사도", "사도 영화"],
+        "기생충": ["기생충", "parasite movie"]
     }
     queries = query_map.get(movie_title, [movie_title])
     try:
@@ -201,15 +183,15 @@ def fetch_yt_videos(movie_title: str):
         for q in queries:
             try:
                 res = yt.search().list(
-                    q=q, part="id,snippet", maxResults=10, type="video"
+                    q=q, part="id,snippet", maxResults=5, type="video"
                 ).execute()
                 for item in res.get("items", []):
                     vid = item["id"]["videoId"]
                     if vid not in seen:
                         seen.add(vid)
                         ids.append(vid)
-            except HttpError:
-                st.warning("YouTube API 호출 실패 (검색)")
+            except HttpError as e:
+                st.warning(f"YouTube 검색 API 실패 (query: '{q}') | Status: {e.resp.status} | Reason: {e.reason}")
                 continue
 
         rows = []
@@ -240,8 +222,8 @@ def fetch_yt_videos(movie_title: str):
                         "유형":           classify_video(title),
                         "url":           f"https://www.youtube.com/watch?v={video_id}",
                     })
-            except HttpError:
-                st.warning("YouTube API 호출 실패 (비디오 상세)")
+            except HttpError as e:
+                st.warning(f"YouTube 상세정보 API 실패 | Status: {e.resp.status} | Reason: {e.reason}")
                 continue
 
         if not rows:
@@ -249,10 +231,9 @@ def fetch_yt_videos(movie_title: str):
         df = pd.DataFrame(rows).drop_duplicates("video_id")
         return df.sort_values("view_count", ascending=False).reset_index(drop=True)
 
-    except Exception:
-        st.warning("YouTube API 호출 실패")
+    except Exception as e:
+        st.warning(f"YouTube API 호출 실패: {str(e)}")
         return pd.DataFrame()
-
 
 @st.cache_data(ttl=3600)
 def fetch_yt_comments(video_ids: tuple):
@@ -261,10 +242,11 @@ def fetch_yt_comments(video_ids: tuple):
     comments = []
     for vid in video_ids:
         try:
-            res = yt.commentThreads().list(videoId=vid, part="snippet", maxResults=50).execute()
+            res = yt.commentThreads().list(videoId=vid, part="snippet", maxResults=30).execute()
             for item in res.get("items", []):
                 comments.append(item["snippet"]["topLevelComment"]["snippet"]["textDisplay"])
-        except HttpError:
+        except HttpError as e:
+            st.warning(f"YouTube 댓글 API 실패 (videoId: {vid}) | Status: {e.resp.status} | Reason: {e.reason}")
             continue
     return comments
 
@@ -320,9 +302,12 @@ def load_all_yt():
 # ─────────────────────────────────────────────
 # Sidebar
 # ─────────────────────────────────────────────
-st.cache_data.clear()
-
 st.sidebar.title("🎬 영화 흥행 비교 대시보드")
+
+if st.sidebar.button("YouTube 캐시 초기화"):
+    st.cache_data.clear()
+    st.rerun()
+
 st.sidebar.markdown("비교 기준 영화를 선택하면\n나머지 3편과 자동으로 비교합니다.")
 focus = st.sidebar.selectbox("🔍 포커스 영화 선택", ALL_MOVIES, index=0)
 others = [m for m in ALL_MOVIES if m != focus]
@@ -643,7 +628,7 @@ with tab3:
     st.subheader(f"📺 YouTube — 포커스 [{focus}] vs 비교 영화")
 
     if df_yt_all.empty:
-        st.info("YouTube 데이터를 불러오지 못했습니다.")
+        st.info("YouTube 데이터를 불러오지 못했습니다.\n\n**예상 원인**\n- API 할당량(Quota) 초과\n- API Key 제한이나 비활성화\n- 검색 결과 없음\n- 네트워크 오류")
     else:
         # 영화별 YouTube 집계 비교
         c1, c2, c3 = st.columns(3)
@@ -708,10 +693,10 @@ with tab3:
             )
 
             # 댓글 키워드 분석
-            st.subheader(f"💬 [{focus}] 상위 3개 영상 댓글 키워드 분석")
-            top3 = tuple(foc_yt_df["video_id"].head(3).tolist())
+            st.subheader(f"💬 [{focus}] 상위 2개 영상 댓글 키워드 분석")
+            top2 = tuple(foc_yt_df["video_id"].head(2).tolist())
             with st.spinner("댓글을 수집하는 중..."):
-                comments = fetch_yt_comments(top3)
+                comments = fetch_yt_comments(top2)
             if comments:
                 kw_df = top_keywords(comments)
                 kw1, kw2 = st.columns([2, 1])
@@ -728,4 +713,4 @@ with tab3:
             else:
                 st.info("댓글 데이터를 수집하지 못했습니다.")
         else:
-            st.info(f"'{focus}'에 대한 YouTube 영상 데이터가 없습니다.")
+            st.info(f"'{focus}'에 대한 YouTube 영상 데이터가 없습니다. (API 제한 등 확인)")
